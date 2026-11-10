@@ -1,11 +1,11 @@
 const os = require('os');
 const mongoose = require('mongoose');
-const { MongoMemoryServer } = require('mongodb-memory-server');
+const { MongoMemoryReplSet } = require('mongodb-memory-server');
 
 let mongod;
 
 const connect = async () => {
-  mongod = await MongoMemoryServer.create();
+  mongod = await MongoMemoryReplSet.create({ replSet: { count: 1, storageEngine: 'wiredTiger' } });
   // The MongoDB driver loads `os` via dynamic import(), which Jest's VM sandbox doesn't support.
   // Passing it in explicitly keeps the handshake metadata intact under Jest.
   await mongoose.connect(mongod.getUri(), { runtimeAdapters: { os } });
