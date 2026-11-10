@@ -12,6 +12,7 @@
     "seed:admin": "node scripts/seedAdmin.js"
   },
   "jest": {
+    "testMatch": ["<rootDir>/tests/**/*.test.js"],
     "testEnvironment": "node",
     "testTimeout": 60000,
     "setupFiles": [

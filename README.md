@@ -54,7 +54,10 @@ Software Development Practice course project — **Project #1: Hotel Booking**. 
 
 > **Status:** auth, hotels and bookings are implemented and tested; the endpoints below are the live contract.
 
-There is no frontend — the API is used and tested via **Postman**.
+The API is used and tested via **Postman**. A separate React + Vite frontend
+for hotel discovery, Favorites and Top 3 is in [`frontend/`](frontend/README.md).
+Run backend `npm run dev`, then `cd frontend`, `npm ci`, `npm run dev` and open
+http://127.0.0.1:5173. Frontend build/lint/browser tests are run separately.
 
 ---
 
@@ -241,7 +244,7 @@ Status codes: `200` OK · `201` Created · `400` validation error · `401` not l
 | Keep user transactions confidential | Every booking query is scoped to the logged-in user unless the caller is an admin; passwords never returned |
 | Respond within 3 seconds | Indexed lookups (`email`, `booking.user`, `booking.hotel`), lean queries, no N+1 populates |
 | Used and tested via Postman | Postman collection + environment in `postman/` |
-| Web REST API, no frontend | Express JSON API only |
+| Original REST API scope | Express JSON API; optional Favorites frontend added for updated requirements |
 | MongoDB Atlas or PostgreSQL | MongoDB Atlas |
 
 ## Getting Started
