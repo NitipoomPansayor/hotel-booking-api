@@ -53,6 +53,8 @@ MongoDB Atlas
 hotel-booking-api/
 ├── docs/                      # assignment brief, design notes
 ├── postman/                   # Postman collection + environment
+├── scripts/
+│   └── seedAdmin.js           # npm run seed:admin
 ├── src/
 │   ├── app.js                 # express app: middleware + route mounting
 │   ├── server.js              # entry point: connect DB, start listening
@@ -199,6 +201,8 @@ Status codes: `200` OK · `201` Created · `400` validation error · `401` not l
 git clone https://github.com/NitipoomPansayor/hotel-booking-api.git
 cd hotel-booking-api
 npm install
+cp .env.example .env      # then fill in MONGO_URI, JWT_SECRET and the ADMIN_* values
+npm run seed:admin        # create the admin account
 npm run dev               # nodemon, http://localhost:5000
 ```
 
@@ -210,14 +214,27 @@ npm run dev               # nodemon, http://localhost:5000
 | `npm start`      | Start in production mode    |
 | `npm test`       | Run Jest test suite         |
 | `npm run lint`   | Lint with ESLint            |
+| `npm run seed:admin` | Create or promote the admin account from `ADMIN_*` env vars |
 
 ### Creating an admin
 
-Registration always creates `role: "user"`. Promote an account to admin directly in MongoDB Atlas (set `role` to `"admin"`) or via a seed script.
+Registration always creates `role: "user"`; the API never accepts `role` from a request. To get an admin, set `ADMIN_NAME`, `ADMIN_TEL`, `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `.env` and run:
+
+```bash
+npm run seed:admin
+```
+
+| If the account with `ADMIN_EMAIL`… | The script… |
+| --- | --- |
+| doesn't exist | creates it with `role: "admin"` |
+| exists as a normal user | promotes it to admin; its name, tel and **password are left unchanged** |
+| is already an admin | does nothing |
+
+It's safe to run more than once, and it never prints the password. Only `MONGO_URI` and `ADMIN_EMAIL` are required to promote an existing account; creating a new one also needs a valid name, tel and password.
 
 ## Testing with Postman
 
-Import `postman/hotel-booking-api.postman_collection.json` and `postman/hotel-booking-api.postman_environment.json`, then fill in the environment's `userPassword`, `adminEmail` and `adminPassword` (the admin account must already have `role: "admin"`, see above).
+Import `postman/hotel-booking-api.postman_collection.json` and `postman/hotel-booking-api.postman_environment.json`, then fill in the environment's `userPassword`, `adminEmail` and `adminPassword`. Use the account created by `npm run seed:admin` (see [Creating an admin](#creating-an-admin)).
 
 Run the folders in order — **Auth → Hotels → Bookings → Cleanup**:
 
