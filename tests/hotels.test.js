@@ -17,6 +17,20 @@ beforeAll(db.connect);
 afterEach(db.clear);
 afterAll(db.close);
 
+describe('hotel pricing', () => {
+  it('persists admin prices and displays THB without a provider', async () => {
+    const { token } = await createAdmin();
+    const created = await request(app).post('/api/v1/hotels').set(bearer(token))
+      .send({ ...validHotel, pricePerNightSatang: 125050 });
+    expect(created.status).toBe(201);
+    const result = await request(app).get(`/api/v1/hotels/${created.body.data._id}?currency=THB`);
+    expect(result.body.data.displayPrice).toMatchObject({ amount: 1250.5, currency: 'THB', stale: false });
+    const invalid = await request(app).put(`/api/v1/hotels/${created.body.data._id}`)
+      .set(bearer(token)).send({ pricePerNightSatang: -1 });
+    expect(invalid.status).toBe(400);
+  });
+});
+
 describe('GET /api/v1/hotels', () => {
   it('lists hotels publicly, sorted by name, with pagination info', async () => {
     await Hotel.create([

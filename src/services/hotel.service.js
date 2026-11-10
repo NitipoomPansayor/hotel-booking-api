@@ -3,7 +3,7 @@ const Booking = require('../models/Booking');
 const ApiError = require('../utils/ApiError');
 const { parsePagination, buildPagination } = require('../utils/pagination');
 
-const EDITABLE_FIELDS = ['name', 'address', 'tel'];
+const EDITABLE_FIELDS = ['name', 'address', 'tel', 'pricePerNightSatang'];
 
 // Only copy whitelisted fields that were actually sent, so clients can't set _id, timestamps, etc.
 const pickEditable = (input) =>

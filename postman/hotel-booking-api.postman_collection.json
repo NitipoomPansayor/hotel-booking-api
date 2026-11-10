@@ -1058,6 +1058,39 @@
           }
         }
       ]
+    },
+    {
+      "name": "Currency prices",
+      "item": [
+        {
+          "name": "Hotels in THB",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/hotels?currency=THB"
+          }
+        },
+        {
+          "name": "Hotels in USD",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/hotels?currency=USD"
+          }
+        },
+        {
+          "name": "Hotels in EUR",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/hotels?currency=EUR"
+          }
+        },
+        {
+          "name": "Hotels in JPY",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/hotels?currency=JPY"
+          }
+        }
+      ]
     }
   ]
 }

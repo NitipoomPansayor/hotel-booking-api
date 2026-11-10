@@ -1,5 +1,19 @@
 # Hotel Booking API
 
+## Currency prices
+
+Hotels may have `pricePerNightSatang` (nonnegative safe integer, THB satang).
+Existing hotels without a price return `displayPrice.amount: null`.
+Admins can set the price with the existing hotel create/update endpoints.
+Use `GET /api/v1/hotels?currency=USD` or `/api/v1/hotels/:id?currency=JPY`.
+Supported currencies: THB (default), USD, EUR, JPY. Responses include
+`displayPrice` with amount, currency, baseCurrency, rate, rateUpdatedAt and stale.
+Set `EXCHANGE_RATE_API_KEY` in `.env` for ExchangeRate-API standard requests.
+Rates are cached for one hour; provider timestamps determine their actual freshness
+(not tick-by-tick market rates). On failure, cached rates no older than 48 hours
+may be returned with `stale: true`; otherwise conversion returns 503. THB needs no key.
+Provider documentation: https://www.exchangerate-api.com/docs/standard-requests
+
 A REST API backend for a hotel booking system, built with **Node.js + Express** and **MongoDB Atlas (Mongoose)**.
 Software Development Practice course project — **Project #1: Hotel Booking**. The assignment brief is in [`docs/`](docs/).
 
