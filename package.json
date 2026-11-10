@@ -8,7 +8,8 @@
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "test": "jest --runInBand",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "seed:admin": "node scripts/seedAdmin.js"
   },
   "jest": {
     "testEnvironment": "node",
