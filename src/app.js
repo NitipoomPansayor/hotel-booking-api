@@ -28,6 +28,7 @@ app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/hotels', hotelRoutes);
 app.use('/api/v1/bookings', bookingRoutes);
 app.use('/api/v1/reports', require('./routes/report.routes'));
+app.use('/api/v1/favorites', require('./routes/favorite.routes'));
 
 app.use(notFound);
 app.use(errorHandler);
