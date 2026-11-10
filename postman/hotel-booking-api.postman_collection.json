@@ -1091,6 +1091,24 @@
           }
         }
       ]
+    },
+    {
+      "name": "Reports",
+      "item": [
+        {
+          "name": "Monthly bookings CSV (admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/reports/bookings/monthly?year=2026&month=11"
+          }
+        }
+      ]
     }
   ]
 }
