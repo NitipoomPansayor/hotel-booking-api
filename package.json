@@ -9,7 +9,9 @@
     "dev": "nodemon src/server.js",
     "test": "jest --runInBand",
     "lint": "eslint .",
-    "seed:admin": "node scripts/seedAdmin.js"
+    "seed:admin": "node scripts/seedAdmin.js",
+    "seed": "node scripts/seed.js",
+    "seed:destroy": "node scripts/seed.js --destroy"
   },
   "jest": {
     "testMatch": ["<rootDir>/tests/**/*.test.js"],

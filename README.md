@@ -106,6 +106,7 @@ hotel-booking-api/
 ├── docs/                      # assignment brief, design notes
 ├── postman/                   # Postman collection + environment
 ├── scripts/
+│   ├── seed.js                # npm run seed / seed:destroy
 │   └── seedAdmin.js           # npm run seed:admin
 ├── src/
 │   ├── app.js                 # express app: middleware + route mounting
@@ -255,6 +256,7 @@ cd hotel-booking-api
 npm install
 cp .env.example .env      # then fill in MONGO_URI, JWT_SECRET and the ADMIN_* values
 npm run seed:admin        # create the admin account
+npm run seed              # optional: load sample hotels, users, bookings and favorites
 npm run dev               # nodemon, http://localhost:5000
 ```
 
@@ -267,6 +269,8 @@ npm run dev               # nodemon, http://localhost:5000
 | `npm test`       | Run Jest test suite         |
 | `npm run lint`   | Lint with ESLint            |
 | `npm run seed:admin` | Create or promote the admin account from `ADMIN_*` env vars |
+| `npm run seed`   | Load sample data (see [Sample data](#sample-data)) |
+| `npm run seed:destroy` | Remove the sample data |
 
 ### Creating an admin
 
@@ -283,6 +287,21 @@ npm run seed:admin
 | is already an admin | does nothing |
 
 It's safe to run more than once, and it never prints the password. Only `MONGO_URI` and `ADMIN_EMAIL` are required to promote an existing account; creating a new one also needs a valid name, tel and password.
+
+### Sample data
+
+Set `SEED_USER_PASSWORD` (at least 6 characters) in `.env` and run `npm run seed` to load the fictional data in `src/data/sampleData.js`:
+
+| What | Count | Notes |
+| --- | --- | --- |
+| Hotels | 8 | Bangkok, Chiang Mai, Phuket, Krabi, Hua Hin and Ayutthaya; one has no price |
+| Users | 4 | `somchai@`, `malee@`, `anan@`, `pim@example.com`, all `role: "user"` and all with password `SEED_USER_PASSWORD`; Pim has no bookings or favorites |
+| Bookings | 5 | Dated from the day you run the seed (one checks in today), 1–3 nights each |
+| Favorites | 8 | Riverside Orchid Bangkok is the top favorite |
+
+The seed only adds what's missing: existing hotels (matched by name) and accounts (matched by email) are left untouched, and a sample user who already has bookings gets no new ones, so it's safe to re-run. It never creates or changes an admin, so run `npm run seed:admin` for that.
+
+`npm run seed:destroy` deletes the sample hotels and sample users, along with **every** booking and favorite attached to them. That includes other users' bookings at a sample hotel. These deletions are not written to the audit log. Admin accounts are never deleted.
 
 ## Testing with Postman
 
