@@ -1,5 +1,17 @@
 # Hotel Booking API
 
+## Monthly booking CSV (admin)
+
+`GET /api/v1/reports/bookings/monthly?year=2026&month=11` downloads
+`bookings-2026-11.csv`. The month is based on booking **createdAt** in
+Asia/Bangkok, while exported timestamps are ISO UTC and stay dates retain the
+existing UTC calendar-day convention. All current bookings in that month are
+exported, without pagination; deleted bookings are not included.
+The UTF-8 BOM CSV contains booking rows and a final `recordType=summary` row
+with totalBookings/totalNights. User/hotel text is CSV-escaped and protected
+against spreadsheet formula injection. Empty months return zero totals.
+No revenue is inferred from current hotel prices: bookings have no historical price.
+
 ## Booking audit history
 
 Booking updates/deletes and hotel cascade deletes automatically append to the

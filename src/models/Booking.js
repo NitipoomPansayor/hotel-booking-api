@@ -34,4 +34,5 @@ const BookingSchema = new mongoose.Schema(
   }
 );
 
+BookingSchema.index({ createdAt: 1, _id: 1 });
 module.exports = mongoose.model('Booking', BookingSchema);
