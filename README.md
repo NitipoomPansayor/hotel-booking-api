@@ -3,7 +3,7 @@
 A REST API backend for a hotel booking system, built with **Node.js + Express** and **MongoDB Atlas (Mongoose)**.
 Software Development Practice course project — **Project #1: Hotel Booking**. The assignment brief is in [`docs/`](docs/).
 
-> **Status:** project setup / design phase. Endpoints below are the planned contract; implementation is in progress.
+> **Status:** auth, hotels and bookings are implemented and tested; the endpoints below are the live contract.
 
 There is no frontend — the API is used and tested via **Postman**.
 
@@ -142,6 +142,31 @@ Base URL: `/api/v1`
 | PUT    | `/bookings/:id`             | Owner / Admin  | Edit a booking                               |
 | DELETE | `/bookings/:id`             | Owner / Admin  | Delete a booking                             |
 
+Booking lists are paginated like `GET /hotels` (`?page=1&limit=25`, max 100) and sorted by check-in date. Each booking includes its `hotel` (`name`, `address`, `tel`); admin lists also include the `user` (`name`, `email`, `tel`).
+
+Accessing another user's booking returns `403`.
+
+#### Booking rules
+
+Request body for create / update:
+
+```json
+{ "checkInDate": "2026-12-01", "checkOutDate": "2026-12-03" }
+```
+
+- Dates are calendar days in **UTC**: any time of day is dropped, so nights are always whole days.
+- Nights = check-out − check-in and must be **1–3**. Check-in may be today but not in the past.
+- On update you may send one or both dates; the resulting stay is re-checked against the same rules.
+- Only the dates can be updated — `user` and `hotel` are fixed when the booking is created (`user` always comes from the token).
+
+| Problem | `400` message |
+| --- | --- |
+| Missing date | `Please add a check-in date` / `Please add a check-out date` |
+| Unparseable date | `Invalid check-in date` / `Invalid check-out date` |
+| Check-in in the past | `Check-in date cannot be in the past` |
+| 0 nights, or check-out before check-in | `Check-out date must be after check-in date` |
+| More than 3 nights | `Booking cannot exceed 3 nights` |
+
 ### Response format
 
 ```jsonc
@@ -149,7 +174,7 @@ Base URL: `/api/v1`
 { "success": true, "data": { ... } }
 // success (list)
 { "success": true, "count": 2, "data": [ ... ] }
-// success (paginated list, e.g. GET /hotels)
+// success (paginated list: GET /hotels, GET /bookings, GET /hotels/:hotelId/bookings)
 { "success": true, "count": 2, "pagination": { "page": 1, "limit": 25, "total": 2, "pages": 1 }, "data": [ ... ] }
 // error
 { "success": false, "message": "Booking cannot exceed 3 nights" }
@@ -170,8 +195,6 @@ Status codes: `200` OK · `201` Created · `400` validation error · `401` not l
 
 ## Getting Started
 
-> Commands become available once the project is scaffolded.
-
 ```bash
 git clone https://github.com/NitipoomPansayor/hotel-booking-api.git
 cd hotel-booking-api
@@ -179,7 +202,7 @@ npm install
 npm run dev               # nodemon, http://localhost:5000
 ```
 
-### Scripts (planned)
+### Scripts
 
 | Command          | Purpose                     |
 | ---------------- | --------------------------- |
@@ -194,4 +217,12 @@ Registration always creates `role: "user"`. Promote an account to admin directly
 
 ## Testing with Postman
 
-Import `postman/hotel-booking-api.postman_collection.json` and the matching environment. The login request saves the returned token into the `{{token}}` environment variable, which every protected request sends as `Authorization: Bearer {{token}}`.
+Import `postman/hotel-booking-api.postman_collection.json` and `postman/hotel-booking-api.postman_environment.json`, then fill in the environment's `userPassword`, `adminEmail` and `adminPassword` (the admin account must already have `role: "admin"`, see above).
+
+Run the folders in order — **Auth → Hotels → Bookings → Cleanup**:
+
+- **Register / Login** save the user's token to `{{token}}`; **Login as Admin** saves `{{adminToken}}`. Protected requests send `Authorization: Bearer <token>`.
+- **Create Hotel** saves `{{hotelId}}` and **Create Booking** saves `{{bookingId}}` for the requests after them.
+- Booking dates are computed relative to today by a collection-level pre-request script, so the collection never goes stale.
+- Requests whose name ends in `(400)`, `(401)` or `(403)` are deliberate failure cases and assert that status.
+- **Register** returns `400` if the email already exists — on later runs, start from **Login**.
