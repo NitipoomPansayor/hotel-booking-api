@@ -1,15 +1,16 @@
 const hotelService = require('../services/hotel.service');
+const { priceHotels } = require('../services/currency.service');
 
 // GET /api/v1/hotels
 const getHotels = async (req, res) => {
   const { hotels, pagination } = await hotelService.listHotels(req.query);
-  res.status(200).json({ success: true, count: hotels.length, pagination, data: hotels });
+  res.status(200).json({ success: true, count: hotels.length, pagination, data: await priceHotels(hotels, req.query.currency) });
 };
 
 // GET /api/v1/hotels/:id
 const getHotel = async (req, res) => {
   const hotel = await hotelService.getHotel(req.params.id);
-  res.status(200).json({ success: true, data: hotel });
+  res.status(200).json({ success: true, data: (await priceHotels([hotel], req.query.currency))[0] });
 };
 
 // POST /api/v1/hotels (admin)

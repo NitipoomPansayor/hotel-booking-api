@@ -12,3 +12,6 @@ Thumbs.db
 docs/
 CLAUDE.md
 CODEX.md
+.npm-cache/
+.tmp/
+.mongodb-binaries/

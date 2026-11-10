@@ -3,6 +3,12 @@ const { TEL_REGEX } = require('../utils/validators');
 
 const HotelSchema = new mongoose.Schema(
   {
+    pricePerNightSatang: {
+      type: Number,
+      min: 0,
+      validate: { validator: (value) => value == null || Number.isSafeInteger(value), message: 'Price must be a safe integer in satang' },
+      default: null,
+    },
     name: {
       type: String,
       required: [true, 'Please add a hotel name'],
