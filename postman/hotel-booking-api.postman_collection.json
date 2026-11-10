@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Hotel Booking API",
-    "description": "Run the folders in order. Register/Login save {{token}}; \"Login as Admin\" saves {{adminToken}} (promote that account to role \"admin\" in MongoDB first). Create Hotel saves {{hotelId}}, Create Booking saves {{bookingId}}. Booking dates are computed relative to today by the collection pre-request script.",
+    "description": "Tests every endpoint of the Hotel Booking API. Run the whole collection in order (Runner → Run).\n\nBefore running: open this collection → Variables tab and set the **Current value** of `adminPassword` (and `adminEmail` if it is not admin@example.com) to the account created by `npm run seed:admin`, then press Ctrl+S. No environment is needed; the optional \"Hotel Booking API - Local\" environment only overrides `baseUrl`.\n\n- Each run registers two new users with unique emails and creates its own hotel, so it can be re-run against the same database.\n- Requests ending in (400), (401), (403) or (404) are deliberate failure cases.\n- Requests send the token as `Authorization: Bearer`; cookies are disabled so 401/403 checks are real.\n- Every request also checks the 3-second response time requirement.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "event": [
@@ -10,21 +10,110 @@
       "script": {
         "type": "text/javascript",
         "exec": [
+          "// Dates relative to today (UTC calendar days, like the API), so the collection never goes stale.",
           "const day = (n) => new Date(Date.now() + n * 864e5).toISOString().slice(0, 10);",
-          "pm.variables.set('checkIn', day(7));",
-          "pm.variables.set('checkOut', day(9));",
-          "pm.variables.set('checkOutTooLong', day(11));",
+          "pm.variables.set('today', day(0));",
+          "pm.variables.set('tomorrow', day(1));",
           "pm.variables.set('pastDate', day(-1));",
+          "pm.variables.set('checkIn', day(7));",
+          "pm.variables.set('oneNightOut', day(8));",
+          "pm.variables.set('checkOut', day(9));",
+          "pm.variables.set('threeNightsOut', day(10));",
+          "pm.variables.set('fourNightsOut', day(11));",
           "pm.variables.set('newCheckIn', day(14));",
-          "pm.variables.set('newCheckOut', day(17));"
+          "pm.variables.set('newCheckOutShort', day(16));",
+          "pm.variables.set('newCheckOut', day(17));",
+          "pm.variables.set('newCheckOutTooLong', day(18));",
+          "pm.variables.set('adminCheckIn', day(20));",
+          "pm.variables.set('adminCheckOut', day(21));",
+          "// The monthly report groups by Asia/Bangkok (UTC+7) month.",
+          "const bangkok = new Date(Date.now() + 7 * 3600e3);",
+          "pm.variables.set('reportYear', String(bangkok.getUTCFullYear()));",
+          "pm.variables.set('reportMonth', String(bangkok.getUTCMonth() + 1).padStart(2, '0'));"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// NFR: every request must complete within 3 seconds.",
+          "pm.test('responds within 3 s', () => pm.expect(pm.response.responseTime).to.be.below(3000));"
         ]
       }
     }
   ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000/api/v1",
+      "type": "string"
+    },
+    {
+      "key": "adminEmail",
+      "value": "admin@example.com",
+      "type": "string"
+    },
+    {
+      "key": "adminPassword",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "userName",
+      "value": "Postman Test User",
+      "type": "string"
+    },
+    {
+      "key": "userTel",
+      "value": "0812345678",
+      "type": "string"
+    },
+    {
+      "key": "userPassword",
+      "value": "",
+      "type": "string"
+    }
+  ],
   "item": [
     {
-      "name": "Auth",
+      "name": "1. Auth",
+      "description": "Creates two throwaway users for this run (unique emails), logs in the admin from the collection Variables tab, and checks auth failures.",
       "item": [
+        {
+          "name": "Start run",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));",
+                  "const runId = Date.now().toString(36);",
+                  "pm.collectionVariables.set('runId', runId);",
+                  "pm.collectionVariables.set('userEmail', `postman.user.${runId}@example.com`);",
+                  "pm.collectionVariables.set('otherEmail', `postman.other.${runId}@example.com`);",
+                  "pm.collectionVariables.set('hotelName', `Postman Test Hotel ${runId}`);",
+                  "pm.collectionVariables.set('userPassword', `Pw-${runId}-${Math.random().toString(36).slice(2, 10)}`);"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/hotels?limit=1",
+            "description": "Checks the API is reachable and picks new emails and a new hotel name for this run, so the collection can be re-run against the same database. This runs in the post-response script: values set in a pre-request script do not reliably carry over to later requests in the Postman app.",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
         {
           "name": "Register",
           "event": [
@@ -34,36 +123,214 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status is 201', () => pm.response.to.have.status(201));",
-                  "if (pm.response.code === 201) pm.environment.set('token', pm.response.json().token);"
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));",
+                  "pm.test('password is never returned', () => pm.expect(pm.response.json().data).to.not.have.property('password'));",
+                  "pm.test('returns a token and a plain user', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.token).to.be.a('string');",
+                  "  pm.expect(body.data.role).to.equal('user');",
+                  "});",
+                  "pm.test('registers this run\\'s email', () => pm.expect(pm.response.json().data.email).to.equal(pm.collectionVariables.get('userEmail')));",
+                  "if (pm.response.code < 300) pm.collectionVariables.set('token', pm.response.json().token);",
+                  "if (pm.response.code < 300) pm.collectionVariables.set('userId', pm.response.json().data._id);"
                 ]
               }
             }
           ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
           "request": {
             "method": "POST",
-            "auth": {
-              "type": "noauth"
-            },
             "header": [
               {
                 "key": "Content-Type",
                 "value": "application/json"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/auth/register",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "auth",
-                "register"
-              ]
+            "url": "{{baseUrl}}/auth/register",
+            "auth": {
+              "type": "noauth"
             },
-            "description": "Fails with 400 if the email is already registered; use Login instead.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"{{userName}}\",\n  \"tel\": \"{{userTel}}\",\n  \"email\": \"{{userEmail}}\",\n  \"password\": \"{{userPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Register second user - role in body is ignored",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));",
+                  "pm.test('role is forced to user', () => pm.expect(pm.response.json().data.role).to.equal('user'));",
+                  "if (pm.response.code < 300) pm.collectionVariables.set('otherToken', pm.response.json().token);",
+                  "if (pm.response.code < 300) pm.collectionVariables.set('otherUserId', pm.response.json().data._id);"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/auth/register",
+            "description": "Sends role \"admin\"; the API must still create a plain user. This user is used for the confidentiality (403) checks.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{userName}}\",\n  \"tel\": \"{{userTel}}\",\n  \"email\": \"{{otherEmail}}\",\n  \"password\": \"{{userPassword}}\",\n  \"role\": \"admin\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Register - duplicate email (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Duplicate value for field: email\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/auth/register",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{userName}}\",\n  \"tel\": \"{{userTel}}\",\n  \"email\": \"{{userEmail}}\",\n  \"password\": \"{{userPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Register - missing fields (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.match(/Please add a name/);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/auth/register",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"missing.fields@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Register - invalid email (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Please add a valid email\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/auth/register",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{userName}}\",\n  \"tel\": \"{{userTel}}\",\n  \"email\": \"not-an-email\",\n  \"password\": \"{{userPassword}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -81,35 +348,164 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status is 200', () => pm.response.to.have.status(200));",
-                  "if (pm.response.code === 200) pm.environment.set('token', pm.response.json().token);"
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));",
+                  "pm.test('password is never returned', () => pm.expect(pm.response.json().data).to.not.have.property('password'));",
+                  "pm.test('logs in the user registered in this run', () => pm.expect(pm.response.json().data._id).to.equal(pm.collectionVariables.get('userId')));",
+                  "if (pm.response.code < 300) pm.collectionVariables.set('token', pm.response.json().token);"
                 ]
               }
             }
           ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
           "request": {
             "method": "POST",
-            "auth": {
-              "type": "noauth"
-            },
             "header": [
               {
                 "key": "Content-Type",
                 "value": "application/json"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/auth/login",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "auth",
-                "login"
-              ]
+            "url": "{{baseUrl}}/auth/login",
+            "auth": {
+              "type": "noauth"
             },
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"{{userEmail}}\",\n  \"password\": \"{{userPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Login - wrong password (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Invalid credentials\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/auth/login",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{userEmail}}\",\n  \"password\": \"wrong-password\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Login - unknown email (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Invalid credentials\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/auth/login",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"nobody.here@example.com\",\n  \"password\": \"whatever1\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Login - missing password (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Please provide an email and password\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/auth/login",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{userEmail}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -126,32 +522,32 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
-                  "if (pm.response.code === 200) pm.environment.set('adminToken', pm.response.json().token);"
+                  "pm.test('adminEmail and adminPassword are set (collection → Variables tab → Current value, then Ctrl+S)', () => {",
+                  "  pm.expect(pm.variables.get('adminEmail'), 'adminEmail').to.not.be.empty;",
+                  "  pm.expect(pm.variables.get('adminPassword'), 'adminPassword').to.not.be.empty;",
+                  "});",
+                  "pm.test('admin login works (check adminEmail / adminPassword match npm run seed:admin)', () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 200) pm.test('account is an admin (run npm run seed:admin)', () => pm.expect(pm.response.json().data.role).to.equal('admin'));",
+                  "if (pm.response.code < 300) pm.collectionVariables.set('adminToken', pm.response.json().token);"
                 ]
               }
             }
           ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
           "request": {
             "method": "POST",
-            "auth": {
-              "type": "noauth"
-            },
             "header": [
               {
                 "key": "Content-Type",
                 "value": "application/json"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/auth/login",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "auth",
-                "login"
-              ]
+            "url": "{{baseUrl}}/auth/login",
+            "description": "Uses adminEmail / adminPassword from the collection Variables tab (create the account with `npm run seed:admin`).",
+            "auth": {
+              "type": "noauth"
             },
             "body": {
               "mode": "raw",
@@ -172,13 +568,21 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));",
+                  "pm.test('password is never returned', () => pm.expect(pm.response.json().data).to.not.have.property('password'));",
+                  "pm.test('is the registered user', () => pm.expect(pm.response.json().data.email).to.equal(pm.collectionVariables.get('userEmail')));"
                 ]
               }
             }
           ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
           "request": {
             "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/auth/me",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -188,69 +592,111 @@
                   "type": "string"
                 }
               ]
-            },
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/auth/me",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "auth",
-                "me"
-              ]
             }
           }
         },
         {
-          "name": "Login - wrong password (401)",
+          "name": "Get Me - no token (401)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status is 401', () => pm.response.to.have.status(401));"
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Not authorized to access this route\");",
+                  "});"
                 ]
               }
             }
           ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
           "request": {
-            "method": "POST",
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/auth/me",
             "auth": {
               "type": "noauth"
-            },
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
+            }
+          }
+        },
+        {
+          "name": "Get Me - invalid token (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Not authorized to access this route\");",
+                  "});"
+                ]
               }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/auth/login",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "auth",
-                "login"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"email\": \"{{userEmail}}\",\n  \"password\": \"wrong-password\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/auth/me",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "not-a-real-token",
+                  "type": "string"
                 }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Unknown route (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.match(/Route not found/);",
+                  "});"
+                ]
               }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/does-not-exist",
+            "auth": {
+              "type": "noauth"
             }
           }
         }
       ]
     },
     {
-      "name": "Hotels",
+      "name": "2. Hotels",
+      "description": "Admin creates the test hotel used by every later folder; it is deleted again in Cleanup.",
       "item": [
         {
           "name": "List Hotels",
@@ -260,35 +706,58 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));",
+                  "pm.test('paginated list shape', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.data).to.be.an('array');",
+                  "  pm.expect(body.count).to.equal(body.data.length);",
+                  "  pm.expect(body.pagination).to.include.keys('page', 'limit', 'total', 'pages');",
+                  "});",
+                  "pm.test('respects limit', () => pm.expect(pm.response.json().data.length).to.be.at.most(5));"
                 ]
               }
             }
           ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
           "request": {
             "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/hotels?page=1&limit=5",
             "auth": {
               "type": "noauth"
-            },
+            }
+          }
+        },
+        {
+          "name": "List Hotels - invalid page (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"page must be a positive integer\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "GET",
             "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/hotels?page=1&limit=25",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "hotels"
-              ],
-              "query": [
-                {
-                  "key": "page",
-                  "value": "1"
-                },
-                {
-                  "key": "limit",
-                  "value": "25"
-                }
-              ]
+            "url": "{{baseUrl}}/hotels?page=0",
+            "auth": {
+              "type": "noauth"
             }
           }
         },
@@ -301,13 +770,25 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status is 201', () => pm.response.to.have.status(201));",
-                  "if (pm.response.code === 201) pm.environment.set('hotelId', pm.response.json().data._id);"
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));",
+                  "pm.test('saves the hotel', () => pm.expect(pm.response.json().data.name).to.equal(pm.collectionVariables.get('hotelName')));",
+                  "if (pm.response.code < 300) pm.collectionVariables.set('hotelId', pm.response.json().data._id);"
                 ]
               }
             }
           ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
           "request": {
             "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/hotels",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -318,24 +799,9 @@
                 }
               ]
             },
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/hotels",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "hotels"
-              ]
-            },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Grand Palace Hotel {{$randomInt}}\",\n  \"address\": \"1 Rama I Rd, Bangkok\",\n  \"tel\": \"021234567\"\n}",
+              "raw": "{\n  \"name\": \"{{hotelName}}\",\n  \"address\": \"1 Sukhumvit Rd, Khlong Toei, Bangkok 10110\",\n  \"tel\": \"021234567\",\n  \"pricePerNightSatang\": 250000\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -345,51 +811,35 @@
           }
         },
         {
-          "name": "Get Hotel",
+          "name": "Create Hotel - duplicate name (400)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Duplicate value for field: name\");",
+                  "});"
                 ]
               }
             }
           ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
           "request": {
-            "method": "GET",
-            "auth": {
-              "type": "noauth"
-            },
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/hotels/{{hotelId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "hotels",
-                "{{hotelId}}"
-              ]
-            }
-          }
-        },
-        {
-          "name": "Update Hotel (Admin)",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
-                ]
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
               }
-            }
-          ],
-          "request": {
-            "method": "PUT",
+            ],
+            "url": "{{baseUrl}}/hotels",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -400,25 +850,155 @@
                 }
               ]
             },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{hotelName}}\",\n  \"address\": \"Somewhere\",\n  \"tel\": \"021234567\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Create Hotel - missing fields (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.match(/Please add an address/);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "POST",
             "header": [
               {
                 "key": "Content-Type",
                 "value": "application/json"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/hotels/{{hotelId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "hotels",
-                "{{hotelId}}"
+            "url": "{{baseUrl}}/hotels",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"tel\": \"029876543\"\n}",
+              "raw": "{\n  \"name\": \"Incomplete Hotel {{runId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Create Hotel - invalid price (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/hotels",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Bad Price Hotel {{runId}}\",\n  \"address\": \"Somewhere\",\n  \"tel\": \"021234567\",\n  \"pricePerNightSatang\": -1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Create Hotel - no token (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Not authorized to access this route\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/hotels",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"x\",\n  \"address\": \"y\",\n  \"tel\": \"021234567\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -435,13 +1015,28 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status is 403', () => pm.response.to.have.status(403));"
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"User role 'user' is not authorized to access this route\");",
+                  "});"
                 ]
               }
             }
           ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
           "request": {
             "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/hotels",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -452,24 +1047,305 @@
                 }
               ]
             },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"x\",\n  \"address\": \"y\",\n  \"tel\": \"021234567\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get Hotel",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));",
+                  "pm.test('THB price is 2,500', () => {",
+                  "  const { displayPrice } = pm.response.json().data;",
+                  "  pm.expect(displayPrice.currency).to.equal('THB');",
+                  "  pm.expect(displayPrice.amount).to.equal(2500);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/hotels/{{hotelId}}",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Get Hotel - not found (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Hotel not found with id 000000000000000000000000\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/hotels/000000000000000000000000",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Get Hotel - invalid id (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.match(/Invalid _id/);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/hotels/not-an-id",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Update Hotel (Admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));",
+                  "pm.test('fields updated', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.tel).to.equal('029876543');",
+                  "  pm.expect(data.pricePerNightSatang).to.equal(300000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "PUT",
             "header": [
               {
                 "key": "Content-Type",
                 "value": "application/json"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/hotels",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "hotels"
+            "url": "{{baseUrl}}/hotels/{{hotelId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Not Allowed Hotel\",\n  \"address\": \"Nowhere\",\n  \"tel\": \"021234567\"\n}",
+              "raw": "{\n  \"tel\": \"029876543\",\n  \"pricePerNightSatang\": 300000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Update Hotel - invalid tel (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Please add a valid telephone number\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/hotels/{{hotelId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tel\": \"abc\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Update Hotel - not found (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/hotels/000000000000000000000000",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tel\": \"021234567\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Update Hotel as User (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"User role 'user' is not authorized to access this route\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/hotels/{{hotelId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tel\": \"021234567\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -481,10 +1357,214 @@
       ]
     },
     {
-      "name": "Bookings",
+      "name": "3. Currency prices",
+      "description": "THB always works. USD/EUR/JPY need EXCHANGE_RATE_API_KEY on the server; without it they return 503, which these tests accept.",
       "item": [
         {
-          "name": "Create Booking (2 nights)",
+          "name": "Hotels in THB",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));",
+                  "pm.test('status is 200, or 503 when conversion is not configured', () => pm.expect(pm.response.code).to.be.oneOf([200, 503]));",
+                  "if (pm.response.code === 200) {",
+                  "  pm.test('prices are shown in the requested currency', () => {",
+                  "    const data = [].concat(pm.response.json().data);",
+                  "    data.forEach((hotel) => pm.expect(hotel.displayPrice.currency).to.equal('THB'));",
+                  "  });",
+                  "} else {",
+                  "  pm.test('503 explains the failure', () => pm.expect(pm.response.json().message).to.match(/Currency/));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/hotels?currency=THB",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Hotels in USD",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200, or 503 when conversion is not configured', () => pm.expect(pm.response.code).to.be.oneOf([200, 503]));",
+                  "if (pm.response.code === 200) {",
+                  "  pm.test('prices are shown in the requested currency', () => {",
+                  "    const data = [].concat(pm.response.json().data);",
+                  "    data.forEach((hotel) => pm.expect(hotel.displayPrice.currency).to.equal('USD'));",
+                  "  });",
+                  "} else {",
+                  "  pm.test('503 explains the failure', () => pm.expect(pm.response.json().message).to.match(/Currency/));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/hotels?currency=USD",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Hotels in EUR",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200, or 503 when conversion is not configured', () => pm.expect(pm.response.code).to.be.oneOf([200, 503]));",
+                  "if (pm.response.code === 200) {",
+                  "  pm.test('prices are shown in the requested currency', () => {",
+                  "    const data = [].concat(pm.response.json().data);",
+                  "    data.forEach((hotel) => pm.expect(hotel.displayPrice.currency).to.equal('EUR'));",
+                  "  });",
+                  "} else {",
+                  "  pm.test('503 explains the failure', () => pm.expect(pm.response.json().message).to.match(/Currency/));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/hotels?currency=EUR",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Hotels in JPY",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200, or 503 when conversion is not configured', () => pm.expect(pm.response.code).to.be.oneOf([200, 503]));",
+                  "if (pm.response.code === 200) {",
+                  "  pm.test('prices are shown in the requested currency', () => {",
+                  "    const data = [].concat(pm.response.json().data);",
+                  "    data.forEach((hotel) => pm.expect(hotel.displayPrice.currency).to.equal('JPY'));",
+                  "  });",
+                  "} else {",
+                  "  pm.test('503 explains the failure', () => pm.expect(pm.response.json().message).to.match(/Currency/));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/hotels?currency=JPY",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Hotel in USD (lowercase code)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200, or 503 when conversion is not configured', () => pm.expect(pm.response.code).to.be.oneOf([200, 503]));",
+                  "if (pm.response.code === 200) {",
+                  "  pm.test('prices are shown in the requested currency', () => {",
+                  "    const data = [].concat(pm.response.json().data);",
+                  "    data.forEach((hotel) => pm.expect(hotel.displayPrice.currency).to.equal('USD'));",
+                  "  });",
+                  "} else {",
+                  "  pm.test('503 explains the failure', () => pm.expect(pm.response.json().message).to.match(/Currency/));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/hotels/{{hotelId}}?currency=usd",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Hotels - unsupported currency (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Currency must be THB, USD, EUR or JPY\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/hotels?currency=GBP",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Bookings",
+      "description": "Covers the 1–3 night rule, owner/admin confidentiality and updates. Dates are relative to today (collection pre-request script).",
+      "item": [
+        {
+          "name": "Create Booking - 2 nights",
           "event": [
             {
               "listen": "test",
@@ -492,13 +1572,29 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status is 201', () => pm.response.to.have.status(201));",
-                  "if (pm.response.code === 201) pm.environment.set('bookingId', pm.response.json().data._id);"
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));",
+                  "pm.test('booking belongs to the caller and the hotel', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.user).to.equal(pm.collectionVariables.get('userId'));",
+                  "  pm.expect(data.hotel._id).to.equal(pm.collectionVariables.get('hotelId'));",
+                  "});",
+                  "if (pm.response.code < 300) pm.collectionVariables.set('bookingId', pm.response.json().data._id);"
                 ]
               }
             }
           ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
           "request": {
             "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/hotels/{{hotelId}}/bookings",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -509,26 +1605,152 @@
                 }
               ]
             },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"checkInDate\": \"{{checkIn}}\",\n  \"checkOutDate\": \"{{checkOut}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Create Booking - 1 night (minimum)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));",
+                  "if (pm.response.code < 300) pm.collectionVariables.set('bookingId2', pm.response.json().data._id);"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "POST",
             "header": [
               {
                 "key": "Content-Type",
                 "value": "application/json"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/hotels/{{hotelId}}/bookings",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "hotels",
-                "{{hotelId}}",
-                "bookings"
+            "url": "{{baseUrl}}/hotels/{{hotelId}}/bookings",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"checkInDate\": \"{{checkIn}}\",\n  \"checkOutDate\": \"{{checkOut}}\"\n}",
+              "raw": "{\n  \"checkInDate\": \"{{checkIn}}\",\n  \"checkOutDate\": \"{{oneNightOut}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Create Booking - 3 nights by second user (maximum)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));",
+                  "if (pm.response.code < 300) pm.collectionVariables.set('otherBookingId', pm.response.json().data._id);"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/hotels/{{hotelId}}/bookings",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{otherToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"checkInDate\": \"{{checkIn}}\",\n  \"checkOutDate\": \"{{threeNightsOut}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Create Booking - check-in today",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/hotels/{{hotelId}}/bookings",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{otherToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"checkInDate\": \"{{today}}\",\n  \"checkOutDate\": \"{{tomorrow}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -545,13 +1767,28 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status is 400', () => pm.response.to.have.status(400));"
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Booking cannot exceed 3 nights\");",
+                  "});"
                 ]
               }
             }
           ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
           "request": {
             "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/hotels/{{hotelId}}/bookings",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -562,26 +1799,111 @@
                 }
               ]
             },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"checkInDate\": \"{{checkIn}}\",\n  \"checkOutDate\": \"{{fourNightsOut}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Create Booking - 0 nights (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Check-out date must be after check-in date\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "POST",
             "header": [
               {
                 "key": "Content-Type",
                 "value": "application/json"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/hotels/{{hotelId}}/bookings",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "hotels",
-                "{{hotelId}}",
-                "bookings"
+            "url": "{{baseUrl}}/hotels/{{hotelId}}/bookings",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"checkInDate\": \"{{checkIn}}\",\n  \"checkOutDate\": \"{{checkOutTooLong}}\"\n}",
+              "raw": "{\n  \"checkInDate\": \"{{checkIn}}\",\n  \"checkOutDate\": \"{{checkIn}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Create Booking - check-out before check-in (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Check-out date must be after check-in date\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/hotels/{{hotelId}}/bookings",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"checkInDate\": \"{{checkOut}}\",\n  \"checkOutDate\": \"{{checkIn}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -598,13 +1920,28 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status is 400', () => pm.response.to.have.status(400));"
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Check-in date cannot be in the past\");",
+                  "});"
                 ]
               }
             }
           ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
           "request": {
             "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/hotels/{{hotelId}}/bookings",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -615,26 +1952,206 @@
                 }
               ]
             },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"checkInDate\": \"{{pastDate}}\",\n  \"checkOutDate\": \"{{checkIn}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Create Booking - missing dates (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Please add a check-in date\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "POST",
             "header": [
               {
                 "key": "Content-Type",
                 "value": "application/json"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/hotels/{{hotelId}}/bookings",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "hotels",
-                "{{hotelId}}",
-                "bookings"
+            "url": "{{baseUrl}}/hotels/{{hotelId}}/bookings",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"checkInDate\": \"{{pastDate}}\",\n  \"checkOutDate\": \"{{checkIn}}\"\n}",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Create Booking - invalid date (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Invalid check-in date\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/hotels/{{hotelId}}/bookings",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"checkInDate\": \"not-a-date\",\n  \"checkOutDate\": \"{{checkOut}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Create Booking - hotel not found (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Hotel not found with id 000000000000000000000000\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/hotels/000000000000000000000000/bookings",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"checkInDate\": \"{{checkIn}}\",\n  \"checkOutDate\": \"{{checkOut}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Create Booking - no token (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Not authorized to access this route\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/hotels/{{hotelId}}/bookings",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"checkInDate\": \"{{checkIn}}\",\n  \"checkOutDate\": \"{{checkOut}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -651,13 +2168,32 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));",
+                  "pm.test('paginated list shape', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.data).to.be.an('array');",
+                  "  pm.expect(body.count).to.equal(body.data.length);",
+                  "  pm.expect(body.pagination).to.include.keys('page', 'limit', 'total', 'pages');",
+                  "});",
+                  "pm.test('only my own bookings', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  const ids = data.map((b) => b._id);",
+                  "  pm.expect(ids).to.include(pm.collectionVariables.get('bookingId'));",
+                  "  pm.expect(ids).to.not.include(pm.collectionVariables.get('otherBookingId'));",
+                  "  data.forEach((b) => pm.expect(b.user).to.equal(pm.collectionVariables.get('userId')));",
+                  "});"
                 ]
               }
             }
           ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
           "request": {
             "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/bookings",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -667,16 +2203,36 @@
                   "type": "string"
                 }
               ]
-            },
+            }
+          }
+        },
+        {
+          "name": "List My Bookings - no token (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Not authorized to access this route\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "GET",
             "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/bookings",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "bookings"
-              ]
+            "url": "{{baseUrl}}/bookings",
+            "auth": {
+              "type": "noauth"
             }
           }
         },
@@ -688,13 +2244,26 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));",
+                  "pm.test('paginated list shape', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.data).to.be.an('array');",
+                  "  pm.expect(body.count).to.equal(body.data.length);",
+                  "  pm.expect(body.pagination).to.include.keys('page', 'limit', 'total', 'pages');",
+                  "});",
+                  "pm.test('admin sees who booked', () => pm.response.json().data.forEach((b) => pm.expect(b.user).to.have.property('email')));"
                 ]
               }
             }
           ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
           "request": {
             "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/bookings?limit=100",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -703,16 +2272,6 @@
                   "value": "{{adminToken}}",
                   "type": "string"
                 }
-              ]
-            },
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/bookings",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "bookings"
               ]
             }
           }
@@ -725,13 +2284,30 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));",
+                  "pm.test('paginated list shape', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.data).to.be.an('array');",
+                  "  pm.expect(body.count).to.equal(body.data.length);",
+                  "  pm.expect(body.pagination).to.include.keys('page', 'limit', 'total', 'pages');",
+                  "});",
+                  "pm.test('all bookings are for this hotel, from both users', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.length).to.equal(4);",
+                  "  data.forEach((b) => pm.expect(b.hotel._id).to.equal(pm.collectionVariables.get('hotelId')));",
+                  "});"
                 ]
               }
             }
           ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
           "request": {
             "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/hotels/{{hotelId}}/bookings",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -740,18 +2316,6 @@
                   "value": "{{adminToken}}",
                   "type": "string"
                 }
-              ]
-            },
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/hotels/{{hotelId}}/bookings",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "hotels",
-                "{{hotelId}}",
-                "bookings"
               ]
             }
           }
@@ -764,13 +2328,23 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status is 403', () => pm.response.to.have.status(403));"
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"User role 'user' is not authorized to access this route\");",
+                  "});"
                 ]
               }
             }
           ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
           "request": {
             "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/hotels/{{hotelId}}/bookings",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -779,18 +2353,6 @@
                   "value": "{{token}}",
                   "type": "string"
                 }
-              ]
-            },
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/hotels/{{hotelId}}/bookings",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "hotels",
-                "{{hotelId}}",
-                "bookings"
               ]
             }
           }
@@ -803,13 +2365,20 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));",
+                  "pm.test('is the right booking', () => pm.expect(pm.response.json().data._id).to.equal(pm.collectionVariables.get('bookingId')));"
                 ]
               }
             }
           ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
           "request": {
             "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/bookings/{{bookingId}}",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -819,16 +2388,149 @@
                   "type": "string"
                 }
               ]
-            },
+            }
+          }
+        },
+        {
+          "name": "Get Booking - another user's (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Not authorized to access this booking\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "GET",
             "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/bookings/{{bookingId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "bookings",
-                "{{bookingId}}"
+            "url": "{{baseUrl}}/bookings/{{otherBookingId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Booking - another user's as Admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/bookings/{{otherBookingId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Booking - not found (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Booking not found with id 000000000000000000000000\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/bookings/000000000000000000000000",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Booking - invalid id (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.match(/Invalid _id/);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/bookings/not-an-id",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
               ]
             }
           }
@@ -841,13 +2543,29 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));",
+                  "pm.test('dates updated', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.checkInDate.slice(0, 10)).to.equal(pm.variables.get('newCheckIn'));",
+                  "  pm.expect(data.checkOutDate.slice(0, 10)).to.equal(pm.variables.get('newCheckOut'));",
+                  "});"
                 ]
               }
             }
           ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
           "request": {
             "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/bookings/{{bookingId}}",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -858,25 +2576,113 @@
                 }
               ]
             },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"checkInDate\": \"{{newCheckIn}}\",\n  \"checkOutDate\": \"{{newCheckOut}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Update Booking - only check-out date",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));",
+                  "pm.test('check-in kept, check-out changed', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.checkInDate.slice(0, 10)).to.equal(pm.variables.get('newCheckIn'));",
+                  "  pm.expect(data.checkOutDate.slice(0, 10)).to.equal(pm.variables.get('newCheckOutShort'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "PUT",
             "header": [
               {
                 "key": "Content-Type",
                 "value": "application/json"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/bookings/{{bookingId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "bookings",
-                "{{bookingId}}"
+            "url": "{{baseUrl}}/bookings/{{bookingId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"checkInDate\": \"{{newCheckIn}}\",\n  \"checkOutDate\": \"{{newCheckOut}}\"\n}",
+              "raw": "{\n  \"checkOutDate\": \"{{newCheckOutShort}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Update Booking - user and hotel cannot be changed",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));",
+                  "pm.test('owner and hotel unchanged', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.user).to.equal(pm.collectionVariables.get('userId'));",
+                  "  pm.expect(data.hotel._id).to.equal(pm.collectionVariables.get('hotelId'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/bookings/{{bookingId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user\": \"{{otherUserId}}\",\n  \"hotel\": \"000000000000000000000000\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -893,13 +2699,28 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status is 400', () => pm.response.to.have.status(400));"
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Booking cannot exceed 3 nights\");",
+                  "});"
                 ]
               }
             }
           ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
           "request": {
             "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/bookings/{{bookingId}}",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -910,30 +2731,251 @@
                 }
               ]
             },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"checkOutDate\": \"{{newCheckOutTooLong}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Update Booking - past check-in (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Check-in date cannot be in the past\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "PUT",
             "header": [
               {
                 "key": "Content-Type",
                 "value": "application/json"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/bookings/{{bookingId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "bookings",
-                "{{bookingId}}"
+            "url": "{{baseUrl}}/bookings/{{bookingId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"checkOutDate\": \"{{checkOutTooLong}}\"\n}",
+              "raw": "{\n  \"checkInDate\": \"{{pastDate}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
+            }
+          }
+        },
+        {
+          "name": "Update Booking - another user's (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Not authorized to access this booking\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/bookings/{{otherBookingId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"checkInDate\": \"{{newCheckIn}}\",\n  \"checkOutDate\": \"{{newCheckOut}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Update Booking - another user's as Admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/bookings/{{otherBookingId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"checkInDate\": \"{{adminCheckIn}}\",\n  \"checkOutDate\": \"{{adminCheckOut}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Update Booking - not found (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/bookings/000000000000000000000000",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"checkInDate\": \"{{newCheckIn}}\",\n  \"checkOutDate\": \"{{newCheckOut}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Delete Booking - another user's (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Not authorized to access this booking\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/bookings/{{bookingId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{otherToken}}",
+                  "type": "string"
+                }
+              ]
             }
           }
         },
@@ -945,13 +2987,19 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));"
                 ]
               }
             }
           ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
           "request": {
             "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/bookings/{{bookingId}}",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -961,41 +3009,67 @@
                   "type": "string"
                 }
               ]
-            },
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/bookings/{{bookingId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "bookings",
-                "{{bookingId}}"
-              ]
             }
           }
-        }
-      ]
-    },
-    {
-      "name": "Cleanup",
-      "description": "Deleting a hotel also deletes all of its bookings.",
-      "item": [
+        },
         {
-          "name": "Delete Hotel (Admin)",
+          "name": "Get Booking - after delete (404)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                  "pm.test('status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.be.a('string');",
+                  "});"
                 ]
               }
             }
           ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/bookings/{{bookingId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Booking - another user's as Admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
           "request": {
             "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/bookings/{{bookingId2}}",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -1005,16 +3079,863 @@
                   "type": "string"
                 }
               ]
-            },
+            }
+          }
+        },
+        {
+          "name": "Delete Booking - not found (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "DELETE",
             "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/hotels/{{hotelId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "hotels",
-                "{{hotelId}}"
+            "url": "{{baseUrl}}/bookings/000000000000000000000000",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Favorites",
+      "description": "Personal favorites (any logged-in user) and the public Top 3.",
+      "item": [
+        {
+          "name": "My Favorites - no token (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Not authorized to access this route\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/favorites",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Save Hotel",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));",
+                  "pm.test('favorite saved', () => pm.expect(pm.response.json().data.hotel).to.equal(pm.collectionVariables.get('hotelId')));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": "{{baseUrl}}/favorites/{{hotelId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Save Hotel again - idempotent",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": "{{baseUrl}}/favorites/{{hotelId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Save Hotel as second user",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": "{{baseUrl}}/favorites/{{hotelId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{otherToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "My Favorites",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));",
+                  "pm.test('paginated list shape', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.data).to.be.an('array');",
+                  "  pm.expect(body.count).to.equal(body.data.length);",
+                  "  pm.expect(body.pagination).to.include.keys('page', 'limit', 'total', 'pages');",
+                  "});",
+                  "pm.test('hotel listed exactly once', () => pm.expect(pm.response.json().data.map((h) => h._id).filter((id) => id === pm.collectionVariables.get('hotelId'))).to.have.length(1));",
+                  "pm.test('includes a displayPrice', () => pm.response.json().data.forEach((h) => pm.expect(h).to.have.property('displayPrice')));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/favorites",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Save Hotel - not found (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Hotel not found\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": "{{baseUrl}}/favorites/000000000000000000000000",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Save Hotel - invalid id (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": "{{baseUrl}}/favorites/not-an-id",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Top 3 Hotels (public)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));",
+                  "pm.test('at most 3, most favorited first', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.length).to.be.at.most(3);",
+                  "  data.forEach((h, i) => {",
+                  "    pm.expect(h.favoriteCount).to.be.at.least(1);",
+                  "    if (i > 0) pm.expect(h.favoriteCount).to.be.at.most(data[i - 1].favoriteCount);",
+                  "  });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/hotels/top-favorites",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Remove Hotel",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/favorites/{{hotelId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Remove Hotel again - idempotent",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/favorites/{{hotelId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "My Favorites - after remove",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));",
+                  "pm.test('hotel no longer listed', () => pm.expect(pm.response.json().data.map((h) => h._id)).to.not.include(pm.collectionVariables.get('hotelId')));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/favorites",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Reports",
+      "description": "Admin CSV of the bookings created in a month (Asia/Bangkok). Uses this month, so it includes this run's bookings.",
+      "item": [
+        {
+          "name": "Monthly Bookings CSV (Admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('is a CSV download', () => {",
+                  "  pm.expect(pm.response.headers.get('Content-Type')).to.include('text/csv');",
+                  "  pm.expect(pm.response.headers.get('Content-Disposition')).to.include(`bookings-${pm.variables.get('reportYear')}-${pm.variables.get('reportMonth')}.csv`);",
+                  "});",
+                  "const csv = pm.response.text();",
+                  "pm.test('has the header and a summary row', () => {",
+                  "  pm.expect(csv).to.include('\"recordType\",\"bookingId\"');",
+                  "  pm.expect(csv).to.match(/\"summary\"/);",
+                  "});",
+                  "pm.test('includes current bookings, not deleted ones', () => {",
+                  "  pm.expect(csv).to.include(pm.collectionVariables.get('otherBookingId'));",
+                  "  pm.expect(csv).to.not.include(pm.collectionVariables.get('bookingId'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/reports/bookings/monthly?year={{reportYear}}&month={{reportMonth}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Monthly Bookings CSV - invalid month (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Provide year (2000-9999) and month (1-12)\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/reports/bookings/monthly?year={{reportYear}}&month=13",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Monthly Bookings CSV - missing year (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Provide year (2000-9999) and month (1-12)\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/reports/bookings/monthly?month=1",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Monthly Bookings CSV as User (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"User role 'user' is not authorized to access this route\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/reports/bookings/monthly?year={{reportYear}}&month={{reportMonth}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Monthly Bookings CSV - no token (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Not authorized to access this route\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/reports/bookings/monthly?year={{reportYear}}&month={{reportMonth}}",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Cleanup",
+      "description": "Deletes the test hotel (which also deletes its bookings and favorites) and logs out. The two test users stay in the database, since there's no API to delete users.",
+      "item": [
+        {
+          "name": "Delete Hotel as User (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"User role 'user' is not authorized to access this route\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/hotels/{{hotelId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Hotel - no token (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Not authorized to access this route\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/hotels/{{hotelId}}",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Delete Hotel (Admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/hotels/{{hotelId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Hotel - after delete (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/hotels/{{hotelId}}",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Booking of deleted hotel is gone (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/bookings/{{otherBookingId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Favorite of deleted hotel is gone",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));",
+                  "pm.test('hotel removed from favorites', () => pm.expect(pm.response.json().data.map((h) => h._id)).to.not.include(pm.collectionVariables.get('hotelId')));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/favorites",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{otherToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Hotel - not found (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/hotels/{{hotelId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
               ]
             }
           }
@@ -1027,13 +3948,20 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success body', () => pm.expect(pm.response.json().success).to.equal(true));",
+                  "pm.test('clears the token cookie', () => pm.expect(pm.response.headers.get('Set-Cookie') || '').to.match(/token=;/));"
                 ]
               }
             }
           ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
           "request": {
             "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/auth/logout",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -1043,121 +3971,37 @@
                   "type": "string"
                 }
               ]
-            },
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/auth/logout",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "auth",
-                "logout"
-              ]
             }
           }
-        }
-      ]
-    },
-    {
-      "name": "Currency prices",
-      "item": [
-        {
-          "name": "Hotels in THB",
-          "request": {
-            "method": "GET",
-            "url": "{{baseUrl}}/hotels?currency=THB"
-          }
         },
         {
-          "name": "Hotels in USD",
-          "request": {
-            "method": "GET",
-            "url": "{{baseUrl}}/hotels?currency=USD"
-          }
-        },
-        {
-          "name": "Hotels in EUR",
-          "request": {
-            "method": "GET",
-            "url": "{{baseUrl}}/hotels?currency=EUR"
-          }
-        },
-        {
-          "name": "Hotels in JPY",
-          "request": {
-            "method": "GET",
-            "url": "{{baseUrl}}/hotels?currency=JPY"
-          }
-        }
-      ]
-    },
-    {
-      "name": "Reports",
-      "item": [
-        {
-          "name": "Monthly bookings CSV (admin)",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{adminToken}}"
+          "name": "Logout - no token (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('error body', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.equal(false);",
+                  "  pm.expect(body.message).to.equal(\"Not authorized to access this route\");",
+                  "});"
+                ]
               }
-            ],
-            "url": "{{baseUrl}}/reports/bookings/monthly?year=2026&month=11"
-          }
-        }
-      ]
-    },
-    {
-      "name": "Favorites",
-      "item": [
-        {
-          "name": "My favorites",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{token}}"
-              }
-            ],
-            "url": "{{baseUrl}}/favorites"
-          }
-        },
-        {
-          "name": "Save hotel",
-          "request": {
-            "method": "PUT",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{token}}"
-              }
-            ],
-            "url": "{{baseUrl}}/favorites/{{hotelId}}"
-          }
-        },
-        {
-          "name": "Remove hotel",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{token}}"
-              }
-            ],
-            "url": "{{baseUrl}}/favorites/{{hotelId}}"
-          }
-        },
-        {
-          "name": "Top 3 hotels",
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/hotels/top-favorites"
+            "url": "{{baseUrl}}/auth/logout",
+            "auth": {
+              "type": "noauth"
+            }
           }
         }
       ]
