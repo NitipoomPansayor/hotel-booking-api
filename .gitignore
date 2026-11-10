@@ -15,3 +15,6 @@ CODEX.md
 .npm-cache/
 .tmp/
 .mongodb-binaries/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
