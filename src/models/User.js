@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { TEL_REGEX } = require('../utils/validators');
 
 const UserSchema = new mongoose.Schema(
   {
@@ -14,7 +15,7 @@ const UserSchema = new mongoose.Schema(
       type: String,
       required: [true, 'Please add a telephone number'],
       trim: true,
-      match: [/^\+?[0-9][0-9\s-]{7,14}$/, 'Please add a valid telephone number'],
+      match: [TEL_REGEX, 'Please add a valid telephone number'],
     },
     email: {
       type: String,

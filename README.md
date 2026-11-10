@@ -125,7 +125,7 @@ Base URL: `/api/v1`
 
 | Method | Endpoint       | Access | Description       |
 | ------ | -------------- | ------ | ----------------- |
-| GET    | `/hotels`      | Public | List hotels       |
+| GET    | `/hotels`      | Public | List hotels (sorted by name; `?page=1&limit=25`, max 100) |
 | GET    | `/hotels/:id`  | Public | Get one hotel     |
 | POST   | `/hotels`      | Admin  | Create a hotel    |
 | PUT    | `/hotels/:id`  | Admin  | Update a hotel    |
@@ -149,6 +149,8 @@ Base URL: `/api/v1`
 { "success": true, "data": { ... } }
 // success (list)
 { "success": true, "count": 2, "data": [ ... ] }
+// success (paginated list, e.g. GET /hotels)
+{ "success": true, "count": 2, "pagination": { "page": 1, "limit": 25, "total": 2, "pages": 1 }, "data": [ ... ] }
 // error
 { "success": false, "message": "Booking cannot exceed 3 nights" }
 ```
