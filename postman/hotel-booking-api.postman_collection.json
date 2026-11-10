@@ -1109,6 +1109,58 @@
           }
         }
       ]
+    },
+    {
+      "name": "Favorites",
+      "item": [
+        {
+          "name": "My favorites",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/favorites"
+          }
+        },
+        {
+          "name": "Save hotel",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/favorites/{{hotelId}}"
+          }
+        },
+        {
+          "name": "Remove hotel",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/favorites/{{hotelId}}"
+          }
+        },
+        {
+          "name": "Top 3 hotels",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/hotels/top-favorites"
+          }
+        }
+      ]
     }
   ]
 }

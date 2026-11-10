@@ -1,5 +1,16 @@
 # Hotel Booking API
 
+## Favorites
+
+Authenticated users (including admins) can manage their own wishlist:
+`GET /api/v1/favorites?page=1&limit=25&currency=THB`,
+`PUT /api/v1/favorites/:hotelId`, `DELETE /api/v1/favorites/:hotelId`.
+PUT/DELETE are idempotent, and a unique user/hotel index prevents duplicate votes.
+Public `GET /api/v1/hotels/top-favorites?currency=THB` uses MongoDB aggregation
+to return up to three favorited hotels with favoriteCount, sorted by count
+descending, then name and ID ascending. Unfavorited hotels are excluded.
+Hotel deletion also removes its favorites in the same transaction.
+
 ## Monthly booking CSV (admin)
 
 `GET /api/v1/reports/bookings/monthly?year=2026&month=11` downloads

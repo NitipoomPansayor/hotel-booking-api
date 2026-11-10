@@ -10,6 +10,7 @@ const { getHotelBookings, createBooking } = require('../controllers/booking.cont
 const { protect, authorize } = require('../middleware/auth');
 
 const router = express.Router();
+router.get('/top-favorites', require('../controllers/favorite.controller').topFavorites);
 
 router.route('/').get(getHotels).post(protect, authorize('admin'), createHotel);
 

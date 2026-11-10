@@ -1,5 +1,6 @@
 const Hotel = require('../models/Hotel');
 const Booking = require('../models/Booking');
+const Favorite = require('../models/Favorite');
 const mongoose = require('mongoose');
 const audit = require('./audit.service');
 const ApiError = require('../utils/ApiError');
@@ -48,6 +49,7 @@ const deleteHotel = async (id, actor) => {
       await audit.record(booking, actor, 'BOOKING_DELETED', audit.snapshot(booking), session, 'hotel_deleted');
     }
     await Booking.deleteMany({ hotel: hotel._id }, { session });
+    await Favorite.deleteMany({ hotel: hotel._id }, { session });
   });
 };
 
