@@ -78,7 +78,7 @@ http://127.0.0.1:5173. Frontend build/lint/browser tests are run separately.
 | Framework      | Express 5                                        |
 | Database       | MongoDB Atlas via Mongoose                       |
 | Auth           | JWT (Bearer header **or** httpOnly cookie), bcrypt password hashing |
-| Security       | helmet, CORS, rate limiting, NoSQL-injection sanitization |
+| Security       | helmet, CORS, rate limiting (`RATE_LIMIT_MAX` per 10 min, default 100), NoSQL-injection sanitization |
 | Testing        | Jest + Supertest (+ mongodb-memory-server), Postman collection |
 
 ## Architecture
@@ -305,12 +305,20 @@ The seed only adds what's missing: existing hotels (matched by name) and account
 
 ## Testing with Postman
 
-Import `postman/hotel-booking-api.postman_collection.json` and `postman/hotel-booking-api.postman_environment.json`, then fill in the environment's `userPassword`, `adminEmail` and `adminPassword`. Use the account created by `npm run seed:admin` (see [Creating an admin](#creating-an-admin)).
+Import `postman/hotel-booking-api.postman_collection.json`, open the collection's **Variables** tab, and set the **Current value** of `adminPassword` to the password of the account created by `npm run seed:admin` (see [Creating an admin](#creating-an-admin)). `adminEmail` defaults to `admin@example.com`; change it if yours differs. Press Ctrl+S, then run the whole collection with the Collection Runner. If the admin login is missing, **Login as Admin** fails first and says so; every admin request after it, and everything that needs the test hotel, fails too.
 
-Run the folders in order — **Auth → Hotels → Bookings → Cleanup**:
+No environment is needed: `baseUrl` defaults to `http://localhost:5000/api/v1`, and values saved during a run (tokens, ids) are stored as collection variables. The optional `postman/hotel-booking-api.postman_environment.json` contains only `baseUrl`, for pointing the collection at another server.
 
-- **Register / Login** save the user's token to `{{token}}`; **Login as Admin** saves `{{adminToken}}`. Protected requests send `Authorization: Bearer <token>`.
-- **Create Hotel** saves `{{hotelId}}` and **Create Booking** saves `{{bookingId}}` for the requests after them.
-- Booking dates are computed relative to today by a collection-level pre-request script, so the collection never goes stale.
-- Requests whose name ends in `(400)`, `(401)` or `(403)` are deliberate failure cases and assert that status.
-- **Register** returns `400` if the email already exists — on later runs, start from **Login**.
+The collection has 96 requests covering every endpoint, run in this order: **Auth → Hotels → Currency prices → Bookings → Favorites → Reports → Cleanup**.
+
+- **Re-runnable:** each run registers two new users with unique emails and creates its own hotel, and Cleanup deletes the hotel (and with it, its bookings and favorites). The test users stay in the database, since there's no API to delete users. The first request, **Start run**, picks the new emails, hotel name and a random password in its post-response script; values set in pre-request scripts do not reliably carry over to later requests in the Postman app.
+- **Two users:** the second user owns a booking, so the 403 checks for other people's bookings are real.
+- **Bearer tokens only:** tokens are saved to `{{token}}`, `{{otherToken}}` and `{{adminToken}}` and sent as `Authorization: Bearer`. Cookies are disabled per request, so the login cookie can't hide a 401.
+- **Failure cases:** requests whose name ends in `(400)`, `(401)`, `(403)` or `(404)` deliberately fail, and they check the exact status and error message.
+- **Dates:** booking dates are computed relative to today by a collection-level pre-request script, so the collection never goes stale.
+- **Response time:** every request checks the 3-second requirement.
+- **Currency:** USD/EUR/JPY requests accept `503` when `EXCHANGE_RATE_API_KEY` isn't set; THB always returns `200`.
+
+The API allows `RATE_LIMIT_MAX` requests per 10 minutes per client (default 100; the limiter is off under `NODE_ENV=test`). One run is 96 requests, so with the default a second run within 10 minutes gets `429`. For local testing, set `RATE_LIMIT_MAX=1000` in `.env` and restart the server. Keep the default in production.
+
+From the command line, `newman run postman/hotel-booking-api.postman_collection.json` works the same way. Set the admin login in the collection's variables first (environment variables override collection variables, so `--env-var adminEmail=<email> --env-var adminPassword=<password>` also works).
