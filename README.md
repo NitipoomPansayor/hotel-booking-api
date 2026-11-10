@@ -23,7 +23,7 @@ There is no frontend — the API is used and tested via **Postman**.
 | Concern        | Choice                                           |
 | -------------- | ------------------------------------------------ |
 | Runtime        | Node.js (LTS)                                    |
-| Framework      | Express                                          |
+| Framework      | Express 5                                        |
 | Database       | MongoDB Atlas via Mongoose                       |
 | Auth           | JWT (Bearer header **or** httpOnly cookie), bcrypt password hashing |
 | Security       | helmet, CORS, rate limiting, NoSQL-injection sanitization |
@@ -70,11 +70,9 @@ hotel-booking-api/
 │   ├── services/
 │   ├── middleware/
 │   │   ├── auth.js            # protect, authorize(...roles)
-│   │   ├── validate.js
 │   │   └── errorHandler.js
 │   └── utils/
-│       ├── ApiError.js
-│       └── asyncHandler.js
+│       └── ApiError.js
 ├── tests/
 └── package.json
 ```
