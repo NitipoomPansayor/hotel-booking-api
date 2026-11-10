@@ -27,7 +27,7 @@ const updateHotel = async (req, res) => {
 
 // DELETE /api/v1/hotels/:id (admin)
 const deleteHotel = async (req, res) => {
-  await hotelService.deleteHotel(req.params.id);
+  await hotelService.deleteHotel(req.params.id, req.user);
   res.status(200).json({ success: true, data: {} });
 };
 

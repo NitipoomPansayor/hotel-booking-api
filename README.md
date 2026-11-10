@@ -1,5 +1,17 @@
 # Hotel Booking API
 
+## Booking audit history
+
+Booking updates/deletes and hotel cascade deletes automatically append to the
+`auditlogs` collection with timestamp, actor ID/role, booking ID, action, reason
+and before/after snapshots. Failed or unauthorized requests do not create logs.
+Changes and logs commit in the same MongoDB transaction: audit failure rolls
+back the operation. Use MongoDB Atlas or a replica set (standalone MongoDB is
+not supported for these mutations). Tests run a single-member replica set.
+Audit history is retained after booking/hotel deletion; no public mutation API
+for audit logs is exposed. Application logging covers these service paths;
+manual database changes are outside this audit mechanism.
+
 ## Currency prices
 
 Hotels may have `pricePerNightSatang` (nonnegative safe integer, THB satang).

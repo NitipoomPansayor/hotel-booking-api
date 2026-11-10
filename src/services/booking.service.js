@@ -1,4 +1,6 @@
 const Booking = require('../models/Booking');
+const mongoose = require('mongoose');
+const audit = require('./audit.service');
 const Hotel = require('../models/Hotel');
 const ApiError = require('../utils/ApiError');
 const { parsePagination, buildPagination } = require('../utils/pagination');
@@ -51,8 +53,8 @@ const assertHotelExists = async (hotelId) => {
 };
 
 // Loads a booking and enforces confidentiality: only its owner or an admin may touch it.
-const findAccessibleBooking = async (id, user) => {
-  const booking = await Booking.findById(id);
+const findAccessibleBooking = async (id, user, session = null) => {
+  const booking = await Booking.findById(id).session(session);
   if (!booking) throw new ApiError(404, `Booking not found with id ${id}`);
   if (!isAdmin(user) && !booking.user.equals(user._id)) {
     throw new ApiError(403, 'Not authorized to access this booking');
@@ -92,23 +94,30 @@ const createBooking = async (hotelId, user, input) => {
 };
 
 const updateBooking = async (id, user, input) => {
-  const booking = await findAccessibleBooking(id, user);
+  await mongoose.connection.transaction(async (session) => {
+    const booking = await findAccessibleBooking(id, user, session);
+    const before = audit.snapshot(booking);
 
-  const checkInDate =
-    input.checkInDate === undefined ? booking.checkInDate : toUtcDay(input.checkInDate, 'check-in date');
-  const checkOutDate =
-    input.checkOutDate === undefined ? booking.checkOutDate : toUtcDay(input.checkOutDate, 'check-out date');
-  validateStay(checkInDate, checkOutDate);
+    const checkInDate =
+      input.checkInDate === undefined ? booking.checkInDate : toUtcDay(input.checkInDate, 'check-in date');
+    const checkOutDate =
+      input.checkOutDate === undefined ? booking.checkOutDate : toUtcDay(input.checkOutDate, 'check-out date');
+    validateStay(checkInDate, checkOutDate);
 
-  // Only the dates are editable; user and hotel stay as they were.
-  booking.set({ checkInDate, checkOutDate });
-  await booking.save();
-  return booking.populate(populateFor(user));
+    // Only the dates are editable; user and hotel stay as they were.
+    booking.set({ checkInDate, checkOutDate });
+    await booking.save({ session });
+    await audit.record(booking, user, 'BOOKING_UPDATED', before, session);
+  });
+  return getBooking(id, user);
 };
 
 const deleteBooking = async (id, user) => {
-  const booking = await findAccessibleBooking(id, user);
-  await booking.deleteOne();
+  await mongoose.connection.transaction(async (session) => {
+    const booking = await findAccessibleBooking(id, user, session);
+    await audit.record(booking, user, 'BOOKING_DELETED', audit.snapshot(booking), session);
+    await booking.deleteOne({ session });
+  });
 };
 
 module.exports = { listBookings, getBooking, createBooking, updateBooking, deleteBooking };

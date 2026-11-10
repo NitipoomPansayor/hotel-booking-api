@@ -1,5 +1,7 @@
 const Hotel = require('../models/Hotel');
 const Booking = require('../models/Booking');
+const mongoose = require('mongoose');
+const audit = require('./audit.service');
 const ApiError = require('../utils/ApiError');
 const { parsePagination, buildPagination } = require('../utils/pagination');
 
@@ -37,10 +39,16 @@ const updateHotel = async (id, input) => {
   return hotel;
 };
 
-const deleteHotel = async (id) => {
-  const hotel = await Hotel.findByIdAndDelete(id);
-  if (!hotel) throw new ApiError(404, `Hotel not found with id ${id}`);
-  await Booking.deleteMany({ hotel: hotel._id });
+const deleteHotel = async (id, actor) => {
+  await mongoose.connection.transaction(async (session) => {
+    const hotel = await Hotel.findByIdAndDelete(id, { session });
+    if (!hotel) throw new ApiError(404, `Hotel not found with id ${id}`);
+    const bookings = Booking.find({ hotel: hotel._id }).session(session).cursor();
+    for await (const booking of bookings) {
+      await audit.record(booking, actor, 'BOOKING_DELETED', audit.snapshot(booking), session, 'hotel_deleted');
+    }
+    await Booking.deleteMany({ hotel: hotel._id }, { session });
+  });
 };
 
 module.exports = { listHotels, getHotel, createHotel, updateHotel, deleteHotel };
