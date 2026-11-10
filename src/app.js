@@ -6,6 +6,7 @@ const cookieParser = require('cookie-parser');
 const { rateLimit } = require('express-rate-limit');
 
 const authRoutes = require('./routes/auth.routes');
+const hotelRoutes = require('./routes/hotel.routes');
 const { notFound, errorHandler } = require('./middleware/errorHandler');
 
 // Strip query selectors like { $gt: '' } from filters built from user input (NoSQL injection)
@@ -23,6 +24,7 @@ if (process.env.NODE_ENV !== 'test') {
 }
 
 app.use('/api/v1/auth', authRoutes);
+app.use('/api/v1/hotels', hotelRoutes);
 
 app.use(notFound);
 app.use(errorHandler);
